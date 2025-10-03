@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from models import LecturaCreate
 from database import get_db_connection
-from datetime import datetime
+from datetime import date, datetime
 
 router = APIRouter(prefix="/api/lecturas", tags=["lecturas"])
 
@@ -404,6 +404,65 @@ async def obtener_datos_historicos(usuario_id: int, periodo: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------- PROMEDIO DEL DÍA ACTUAL -----------------
+@router.get("/promedio-hoy/{usuario_id}")
+async def promedio_dia_actual(usuario_id: int):
+    """
+    Devuelve el promedio de todas las lecturas del usuario para el día actual (hoy),
+    redondeando los valores a 2 decimales.
+    """
+    try:
+        # Obtener la fecha actual
+        hoy = date.today()
+        fecha_inicio = hoy.strftime("%Y-%m-%d 00:00:00")
+        fecha_fin = hoy.strftime("%Y-%m-%d 23:59:59")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                AVG(CAST(nitrogeno AS FLOAT)) as nitrogeno,
+                AVG(CAST(fosforo AS FLOAT)) as fosforo,
+                AVG(CAST(potasio AS FLOAT)) as potasio,
+                AVG(CAST(ph AS FLOAT)) as ph,
+                AVG(CAST(humedad AS FLOAT)) as humedad,
+                AVG(CAST(temperatura AS FLOAT)) as temperatura,
+                AVG(CAST(luz_solar AS FLOAT)) as luz_solar,
+                COUNT(*) as total_lecturas
+            FROM lecturas
+            WHERE usuario_id = ? AND fecha_hora BETWEEN ? AND ?
+        """, (usuario_id, fecha_inicio, fecha_fin))
+
+        result = cursor.fetchone()
+        conn.close()
+
+        if result and result[7] > 0:  # Si hay lecturas (total_lecturas > 0)
+            return {
+                "fecha": hoy.strftime("%Y-%m-%d"),
+                "total_lecturas": result[7],
+                "promedios": {
+                    "nitrogeno": round(float(result[0]), 2) if result[0] else 0,
+                    "fosforo": round(float(result[1]), 2) if result[1] else 0,
+                    "potasio": round(float(result[2]), 2) if result[2] else 0,
+                    "ph": round(float(result[3]), 2) if result[3] else 0,
+                    "humedad": round(float(result[4]), 2) if result[4] else 0,
+                    "temperatura": round(float(result[5]), 2) if result[5] else 0,
+                    "luz_solar": round(float(result[6]), 2) if result[6] else 0
+                },
+                "message": f"Promedio de {result[7]} lecturas del día de hoy"
+            }
+        else:
+            return {
+                "fecha": hoy.strftime("%Y-%m-%d"),
+                "message": "No hay lecturas para el día de hoy",
+                "total_lecturas": 0,
+                "promedios": None
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ----------------- ENDPOINT ADICIONAL PARA GRÁFICA ESPECÍFICA -----------------
 @router.get("/historico/{usuario_id}/{periodo}/{parametro}")
